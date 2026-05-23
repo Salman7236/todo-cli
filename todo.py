@@ -101,7 +101,11 @@ def list_tasks(filter: str = None):
                 due_text = due
 
         status = "[green]✓[/green]" if done else "[yellow]○[/yellow]"
-        task_text = f"[green]{task}[/green]" if done else f"[yellow]{task}[/yellow]"
+        task_text = (
+            f"[green][strike]{task}[/strike][/green]"
+            if done
+            else f"[yellow]{task}[/yellow]"
+        )
         table.add_row(str(id), status, task_text, due_text)
 
     console.print(table)
