@@ -1,7 +1,5 @@
 # todo-cli
 
-First Python project after finishing CS50. A CLI todo app.
-
 Uses `typer` for commands, `rich` for the table output, and `SQLite` to store tasks.
 
 ![todo-cli list screenshot](images/screenshot_todo_list.png)

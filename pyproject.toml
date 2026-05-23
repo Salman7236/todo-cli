@@ -11,4 +11,7 @@ dependencies = [
 ]
 
 [project.scripts]
-todo = "main:app"
+todo = "todo:app"
+
+[tool.setuptools]
+py-modules = ["todo"]
