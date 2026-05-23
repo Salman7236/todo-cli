@@ -126,6 +126,20 @@ def delete(id: int):
 
 
 @app.command()
+def purge():
+    con = init_db()
+    cur = con.cursor()
+    cur.execute("DELETE FROM tasks WHERE done = 1")
+
+    if cur.rowcount == 0:
+        console.print("[yellow]No completed tasks to clean up.[/yellow]")
+    else:
+        con.commit()
+        console.print(f"[green]Purged {cur.rowcount} completed tasks![/green]")
+    con.close()
+
+
+@app.command()
 def edit(id: int, task: str = None, due: str = None):
     con = init_db()
     cur = con.cursor()
