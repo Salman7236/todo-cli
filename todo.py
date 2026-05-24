@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -14,7 +15,9 @@ DB_PATH = Path.home() / ".local" / "share" / "todo_app"
 DB_PATH.mkdir(parents=True, exist_ok=True)
 
 
-def init_db():
+@contextmanager
+def get_db():
+    # setup the connection and ensure table exists whenever we access the db
     con = sqlite3.connect(DB_PATH / "tasks.db")
     cur = con.cursor()
     cur.execute("""
@@ -25,8 +28,13 @@ def init_db():
             done INTEGER DEFAULT 0
         )
     """)
-    con.commit()
-    return con
+    try:
+        # yield lets the command run its logic using this connection
+        yield con
+        con.commit()
+    finally:
+        # always close the connection when finished, even if errors occur
+        con.close()
 
 
 @app.command()
@@ -45,38 +53,35 @@ def add(task: str, due: str = None):
     if not due:
         due = datetime.now().strftime("%Y-%m-%d")
 
-    con = init_db()
-    cur = con.cursor()
-    cur.execute("INSERT INTO tasks (task, due) VALUES (?, ?)", (task, due))
-    con.commit()
-    con.close()
+    # use the context manager to handle the connection lifecycle
+    with get_db() as con:
+        cur = con.cursor()
+        cur.execute("INSERT INTO tasks (task, due) VALUES (?, ?)", (task, due))
     typer.echo(f"Added: {task}")
 
 
 @app.command(name="list")
 def list_tasks(filter: str = None):
-    con = init_db()
-    cur = con.cursor()
+    with get_db() as con:
+        cur = con.cursor()
 
-    # Handle different view filters
-    if filter == "done":
-        cur.execute("SELECT * FROM tasks WHERE done = 1")
-    elif filter == "pending":
-        cur.execute("SELECT * FROM tasks WHERE done = 0")
-    elif filter == "overdue":
-        cur.execute(
-            "SELECT * FROM tasks WHERE done = 0 AND due < ?",
-            (datetime.now().strftime("%Y-%m-%d"),),
-        )
-    elif filter is None:
-        cur.execute("SELECT * FROM tasks")
-    else:
-        console.print("[red]Invalid filter. Use: done, pending, overdue[/red]")
-        con.close()
-        return
+        # Handle different view filters
+        if filter == "done":
+            cur.execute("SELECT * FROM tasks WHERE done = 1")
+        elif filter == "pending":
+            cur.execute("SELECT * FROM tasks WHERE done = 0")
+        elif filter == "overdue":
+            cur.execute(
+                "SELECT * FROM tasks WHERE done = 0 AND due < ?",
+                (datetime.now().strftime("%Y-%m-%d"),),
+            )
+        elif filter is None:
+            cur.execute("SELECT * FROM tasks")
+        else:
+            console.print("[red]Invalid filter. Use: done, pending, overdue[/red]")
+            return
 
-    tasks = cur.fetchall()
-    con.close()
+        tasks = cur.fetchall()
 
     if not tasks:
         console.print("No tasks yet.")
@@ -113,85 +118,76 @@ def list_tasks(filter: str = None):
 
 @app.command()
 def delete(id: int):
-    con = init_db()
-    cur = con.cursor()
-    cur.execute("DELETE FROM tasks WHERE id = ?", (id,))
+    with get_db() as con:
+        cur = con.cursor()
+        cur.execute("DELETE FROM tasks WHERE id = ?", (id,))
 
-    if cur.rowcount == 0:
-        console.print("[red]Task not found.[/red]")
-    else:
-        con.commit()
-        typer.echo(f"Deleted task {id}.")
-    con.close()
+        if cur.rowcount == 0:
+            console.print("[red]Task not found.[/red]")
+        else:
+            typer.echo(f"Deleted task {id}.")
 
 
 @app.command()
 def purge():
-    con = init_db()
-    cur = con.cursor()
-    cur.execute("DELETE FROM tasks WHERE done = 1")
+    with get_db() as con:
+        cur = con.cursor()
+        cur.execute("DELETE FROM tasks WHERE done = 1")
 
-    if cur.rowcount == 0:
-        console.print("[yellow]No completed tasks to clean up.[/yellow]")
-    else:
-        con.commit()
-        console.print(f"[green]Purged {cur.rowcount} completed tasks![/green]")
-    con.close()
+        if cur.rowcount == 0:
+            console.print("[yellow]No completed tasks to clean up.[/yellow]")
+        else:
+            console.print(f"[green]Purged {cur.rowcount} completed tasks![/green]")
 
 
 @app.command()
 def edit(id: int, task: str = None, due: str = None):
-    con = init_db()
-    cur = con.cursor()
+    with get_db() as con:
+        cur = con.cursor()
 
-    # Check if task exists
-    cur.execute("SELECT id FROM tasks WHERE id = ?", (id,))
-    if not cur.fetchone():
-        console.print(f"[red]Task {id} not found.[/red]")
-        con.close()
-        return
-
-    # Ensure user passed something to update
-    if not task and not due:
-        console.print("[yellow]Nothing to update. Provide --task or --due.[/yellow]")
-        con.close()
-        return
-
-    # Validate new date
-    if due:
-        try:
-            datetime.strptime(due, "%Y-%m-%d")
-        except ValueError:
-            console.print(
-                "[red]Invalid date format. Use YYYY-MM-DD (e.g. 2026-05-25)[/red]"
-            )
-            con.close()
+        # Check if task exists
+        cur.execute("SELECT id FROM tasks WHERE id = ?", (id,))
+        if not cur.fetchone():
+            console.print(f"[red]Task {id} not found.[/red]")
             return
 
-    # Apply updates dynamically
-    if task:
-        cur.execute("UPDATE tasks SET task = ? WHERE id = ?", (task, id))
-    if due:
-        cur.execute("UPDATE tasks SET due = ? WHERE id = ?", (due, id))
+        # Ensure user passed something to update
+        if not task and not due:
+            console.print(
+                "[yellow]Nothing to update. Provide --task or --due.[/yellow]"
+            )
+            return
 
-    con.commit()
-    con.close()
-    typer.echo(f"Updated task {id}.")
+        # Validate new date
+        if due:
+            try:
+                datetime.strptime(due, "%Y-%m-%d")
+            except ValueError:
+                console.print(
+                    "[red]Invalid date format. Use YYYY-MM-DD (e.g. 2026-05-25)[/red]"
+                )
+                return
+
+        # Apply updates dynamically
+        if task:
+            cur.execute("UPDATE tasks SET task = ? WHERE id = ?", (task, id))
+        if due:
+            cur.execute("UPDATE tasks SET due = ? WHERE id = ?", (due, id))
+
+        typer.echo(f"Updated task {id}.")
 
 
 @app.command()
 def complete(id: int):
-    con = init_db()
-    cur = con.cursor()
-    cur.execute("UPDATE tasks SET done = 1 WHERE id = ?", (id,))
+    with get_db() as con:
+        cur = con.cursor()
+        cur.execute("UPDATE tasks SET done = 1 WHERE id = ?", (id,))
 
-    # rowcount is 0 if the ID didn't exist in the DB
-    if cur.rowcount == 0:
-        console.print("[red]Task not found.[/red]")
-    else:
-        con.commit()
-        typer.echo(f"Completed task {id}.")
-    con.close()
+        # rowcount is 0 if the ID didn't exist in the DB
+        if cur.rowcount == 0:
+            console.print("[red]Task not found.[/red]")
+        else:
+            typer.echo(f"Completed task {id}.")
 
 
 if __name__ == "__main__":
