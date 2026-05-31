@@ -9,7 +9,7 @@ Uses `typer` for commands, `rich` for the table output, and `SQLite` to store ta
 ```bash
 git clone https://github.com/Salman7236/todo-cli.git
 cd todo-cli
-pipx install .
+pipx install todo-cli
 ```
 
 ## Commands
